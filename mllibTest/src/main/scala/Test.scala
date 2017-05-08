@@ -5,10 +5,12 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.Row
 
 import org.apache.spark.ml.feature.QuantileDiscretizer
 import org.apache.spark.mllib.fpm.FPGrowth
 
+import mllibTest.models.discretization._
 
 
 object Test {
@@ -41,6 +43,24 @@ object Test {
 		discretizer.fit(df).transform(df).drop(colName)
 	}
 
+	def applyQuantileDiscretization(
+		df: DataFrame,
+		colName: String,
+		numBuckets: Int,
+		relativeError: Double = 0.05,
+		specialCase: PartialFunction[Double, String] = Map.empty)
+		(implicit spark: SparkSession): DataFrame = {
+		
+		val sqlContext = new org.apache.spark.sql.SQLContext(spark.sparkContext)
+		import sqlContext.implicits._
+		import org.apache.spark.sql.catalyst.expressions.MonotonicallyIncreasingID
+
+		val discretization = new MyQuantileDiscretizer(numBuckets, relativeError)
+		val newCol: RDD[String] = discretization.discretize( df.select(colName).rdd.map(row => row.getAs[Double](colName) ), sqlContext, specialCase = specialCase )
+		val asDF = newCol.toDF(colName).withColumn("id", MonotonicallyIncreasingID())
+		df.drop(colName).withColumn("id", MonotonicallyIncreasingID()).join(asDF, "id", "outer").drop("id") //.withColumn(colName, newCol.toDF("TEMP")("TEMP"))
+	}
+
 	def dataFrameToFeatures(df: DataFrame): RDD[Array[String]] = {
 		val names = df.schema.fields.map(field => field.name)
 		val len = names.length
@@ -51,7 +71,7 @@ object Test {
 
 	def main(args: Array[String]): Unit = {
 
-		val spark = initSpark()
+		implicit val spark = initSpark()
 
 		val dataPath = "/home/carat/singlesamples-from-2016-08-26-to-2016-10-03-facebook-and-features-text-discharge-noinfs.csv"
 
@@ -77,7 +97,10 @@ object Test {
 			.schema(schema)
 			.load(dataPath)
 
-		samples = discretizeCol(samples, "rate", 4)
+		val discretization = new QuantileDiscretization(4)
+
+		//samples = discretization.discretize(samples, "rate")  //discretizeCol(samples, "rate", 4)
+		samples = applyQuantileDiscretization(samples, "rate", 4)
 		samples = discretizeCol(samples, "cpu", 4)
 		samples = discretizeCol(samples, "distance", 4)
 		samples = discretizeCol(samples, "temp", 4)
@@ -90,7 +113,7 @@ object Test {
 
 		//convert to features
 		val features = dataFrameToFeatures(samples)
-		println(features.take(5))
+		//println(features.take(5))
 
 		val fpg = new FPGrowth()
 			.setMinSupport(0.005)
