@@ -2,7 +2,7 @@ name := "MLlib Test"
 
 version := "0.1"
 
-// scalaVersion := "2.11.8"
+scalaVersion := "2.11.6"
 
 val sparkVersion = "2.0.1"
 

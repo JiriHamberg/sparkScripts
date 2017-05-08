@@ -10,8 +10,9 @@ import org.apache.spark.sql.Row
 import org.apache.spark.ml.feature.QuantileDiscretizer
 import org.apache.spark.mllib.fpm.FPGrowth
 
-import mllibTest.models.discretization._
+//import mllibTest.models.discretization._
 
+import mllibTest.models.samples._
 
 object Test {
 
@@ -34,16 +35,16 @@ object Test {
 			.getOrCreate()
 	}
 
-	def discretizeCol(df: DataFrame, colName: String, numBuckets: Int): DataFrame = {
+	/*def discretizeCol(df: DataFrame, colName: String, numBuckets: Int): DataFrame = {
 		val discretizer = new QuantileDiscretizer()
 			.setInputCol(colName)
 			.setOutputCol(s"${colName}D")
 			.setNumBuckets(numBuckets)
 
 		discretizer.fit(df).transform(df).drop(colName)
-	}
+	}*/
 
-	def applyQuantileDiscretization(
+/*	def applyQuantileDiscretization(
 		df: DataFrame,
 		colName: String,
 		numBuckets: Int,
@@ -59,23 +60,25 @@ object Test {
 		val newCol: RDD[String] = discretization.discretize( df.select(colName).rdd.map(row => row.getAs[Double](colName) ), sqlContext, specialCase = specialCase )
 		val asDF = newCol.toDF(colName).withColumn("id", MonotonicallyIncreasingID())
 		df.drop(colName).withColumn("id", MonotonicallyIncreasingID()).join(asDF, "id", "outer").drop("id") //.withColumn(colName, newCol.toDF("TEMP")("TEMP"))
-	}
+	}*/
 
-	def dataFrameToFeatures(df: DataFrame): RDD[Array[String]] = {
+	/*def dataFrameToFeatures(df: DataFrame): RDD[Array[String]] = {
 		val names = df.schema.fields.map(field => field.name)
 		val len = names.length
 		df.rdd.map { row =>
 			(for( i <- 0 to (len - 1) ) yield s"${names(i)}=${row(i)}").toArray
 		}
-	}
+	}*/
 
 	def main(args: Array[String]): Unit = {
 
 		implicit val spark = initSpark()
+		implicit val sc = spark.sparkContext
+		implicit val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 
 		val dataPath = "/home/carat/singlesamples-from-2016-08-26-to-2016-10-03-facebook-and-features-text-discharge-noinfs.csv"
 
-		val schema = StructType(
+		/*val schema = StructType(
 			Seq(
 				StructField("rate", DoubleType, false),
 				StructField("cpu", DoubleType, false),
@@ -89,7 +92,6 @@ object Test {
 				StructField("wifiSpeed", DoubleType, false)  //ShortType really
 			)
 		)
-
 		var samples = spark.read
 			.format("com.databricks.spark.csv")
 			.option("header", "false")
@@ -114,6 +116,21 @@ object Test {
 		//convert to features
 		val features = dataFrameToFeatures(samples)
 		//println(features.take(5))
+		*/
+
+		val samples = Sample.parseCSV(dataPath, sep = ";")
+
+		val rates = samples.map(_.rate)
+
+		//val rateQuantiles = Discretization.getQuantiles(rates, 4)
+
+		//samples.take(5).map(println)
+
+		//rateQuantiles.map(println)
+
+		val features = Discretization.getFeatures(samples)
+
+		//features.take(10).map(_.mkString(" ")).map(println)
 
 		val fpg = new FPGrowth()
 			.setMinSupport(0.005)
