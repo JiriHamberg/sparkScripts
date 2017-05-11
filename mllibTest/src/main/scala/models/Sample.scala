@@ -39,14 +39,7 @@ object Sample {
 
 object Discretization {
 
-	/*def discretize(samples: RDD[Sample]): RDD[Map[String, String]] = {
-		samples.map { sample =>
-
-
-		}
-	}*/
-
-	def getQuantiles(
+	private def getQuantiles(
 		data: RDD[Double],
 		buckets: Int,
 		relativeError: Double = 0.05,
@@ -61,14 +54,14 @@ object Discretization {
 		notDefined.toDF("col").stat.approxQuantile("col", percentiles, relativeError)
 	}
 
-	def getFeatureFromQuantiles(dataPoint: Double, featureName: String, quantiles: Array[Double], partial: PartialFunction[Double, Option[String]] = Map.empty): Option[String] = {
+	private def getFeatureFromQuantiles(dataPoint: Double, featureName: String, quantiles: Array[Double], partial: PartialFunction[Double, Option[String]] = Map.empty): Option[String] = {
 		if(partial.isDefinedAt(dataPoint)) return partial(dataPoint).map(x => s"${featureName}=${x}")
 		var index = quantiles.indexWhere(q => q >= dataPoint) + 1
 		if (index == 0) index += (quantiles.length + 1)
 		Some(s"${featureName}=q${index}")
 	}
 
-	def getFeatureFromPartial[T](dataPoint: T, featureName: String, partial: PartialFunction[T, Option[String]]): Option[String] = {
+	private def getFeatureFromPartial[T](dataPoint: T, featureName: String, partial: PartialFunction[T, Option[String]]): Option[String] = {
 		if(partial.isDefinedAt(dataPoint))
 			partial(dataPoint).map(x => s"${featureName}=${x}")
 		else 
@@ -151,7 +144,5 @@ object Discretization {
 			).collect { case Some(s) => s }
 		}
 	}
-
-	//def discretizeRate(): 
 
 }
