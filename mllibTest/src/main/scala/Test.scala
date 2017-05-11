@@ -10,6 +10,8 @@ import org.apache.spark.sql.Row
 import org.apache.spark.ml.feature.QuantileDiscretizer
 import org.apache.spark.mllib.fpm.FPGrowth
 
+import java.io._
+
 //import mllibTest.models.discretization._
 
 import mllibTest.models.samples._
@@ -77,6 +79,10 @@ object Test {
 		implicit val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 
 		val dataPath = "/home/carat/singlesamples-from-2016-08-26-to-2016-10-03-facebook-and-features-text-discharge-noinfs.csv"
+		//args.map(println)
+		val minSupport = args(0).toDouble
+		val minConfidence = args(1).toDouble
+		val ruleOutFile = args(2)
 
 		/*val schema = StructType(
 			Seq(
@@ -133,20 +139,27 @@ object Test {
 		//features.take(10).map(_.mkString(" ")).map(println)
 
 		val fpg = new FPGrowth()
-			.setMinSupport(0.005)
+			.setMinSupport(minSupport)  //.setMinSupport(0.005)
 			.setNumPartitions(10)
 		val model = fpg.run(features)
 
-		model.freqItemsets.collect().foreach { itemset =>
+		/*model.freqItemsets.collect().foreach { itemset =>
 			println(itemset.items.mkString("[", ",", "]") + ", " + itemset.freq)
-		}
+		}*/
 
-		val minConfidence = 0.7
+		val outFile = new File(ruleOutFile)
+		val writer = new BufferedWriter(new FileWriter(outFile))
+
+		//val minConfidence = 0.7
 		model.generateAssociationRules(minConfidence).collect().foreach { rule =>
-			println(
+			/*println(
 			rule.antecedent.mkString("[", ",", "]")
 				+ " => " + rule.consequent .mkString("[", ",", "]")
 				+ ", " + rule.confidence)
+			*/
+			val antecedents = rule.antecedent.mkString(",")
+			val consequents = rule.consequent.mkString(",")
+			writer.write(s"${antecedents}\t${consequents}\n")
 		}
 
 	}
