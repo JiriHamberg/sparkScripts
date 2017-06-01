@@ -11,8 +11,12 @@ import org.apache.spark.ml.feature.QuantileDiscretizer
 import org.apache.spark.mllib.fpm.FPGrowth
 
 import java.io._
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+import org.json4s.JsonDSL._
 
 import mllibTest.models.samples._
+
 
 object Test {
 
@@ -25,6 +29,13 @@ object Test {
 			.getOrCreate()
 	}
 
+	def timeIt[T](block: => T): (T, Long) = {
+		val t0 = System.currentTimeMillis()
+		val result = block
+		val t1 = System.currentTimeMillis()
+		(result, t1 - t0)
+	}
+
 	def main(args: Array[String]): Unit = {
 
 		implicit val spark = initSpark()
@@ -35,33 +46,58 @@ object Test {
 
 		val minSupport = args(0).toDouble
 		val minConfidence = args(1).toDouble
-		val ruleOutFile = args(2)
+		//val ruleOutFile = args(2)
 
 		val samples = Sample.parseCSV(dataPath, sep = ";")
-		val features = Discretization.getFeatures(samples)
+		val (features, quantiles) = Discretization.getFeatures(samples)
 
 		val fpg = new FPGrowth()
 			.setMinSupport(minSupport)
 			.setNumPartitions(10)
 		val model = fpg.run(features)
 
-		/*model.freqItemsets.collect().foreach { itemset =>
-			println(itemset.items.mkString("[", ",", "]") + ", " + itemset.freq)
-		}*/
+		//val outFile = new File(ruleOutFile)
+		//val writer = new BufferedWriter(new FileWriter(outFile))
 
-		val outFile = new File(ruleOutFile)
-		val writer = new BufferedWriter(new FileWriter(outFile))
-
-		model.generateAssociationRules(minConfidence).collect().foreach { rule =>
-			/*println(
-			rule.antecedent.mkString("[", ",", "]")
-				+ " => " + rule.consequent .mkString("[", ",", "]")
-				+ ", " + rule.confidence)
-			*/
-			val antecedents = rule.antecedent.mkString(",")
-			val consequents = rule.consequent.mkString(",")
-			writer.write(s"${antecedents}\t${consequents}\n")
+		val rulesJSON = model.generateAssociationRules(minConfidence)
+		//take only rules which contain energy rate in the consequent
+		.filter { rule =>
+			rule.consequent.find { item =>
+				item.startsWith("rate=")
+			}.isDefined
 		}
+		//sort rules by descending confidence
+		.sortBy( - _.confidence)
+		.map { rule =>
+			("antecedents" -> rule.antecedent.toSeq) ~
+			("consequents" -> rule.consequent.toSeq) ~
+			("confidence" -> rule.confidence)
+		}
+		
+		val (rules, time) = timeIt(rulesJSON.collect().toSeq)
+
+		//val rendered = pretty(render(rulesJSON.collect().toSeq))
+		val quantilesFormatted = quantiles.map { case (k,v) =>
+			k -> v.toSeq
+		}
+
+		val rendered = pretty(render {
+			("executionTime" -> time) ~
+			("quantiles" -> quantilesFormatted) ~
+			("rules" -> rules)
+		})
+
+		println(rendered)
+
+		//.foreach { rule =>
+		//	val antecedents = rule.antecedent.mkString(",")
+		//	val consequents = rule.consequent.mkString(",")
+		//	val confidence = rule.confidence
+			//writer.write(s"${antecedents}\t${consequents}\t${confidence}\n")
+			//println(s"${antecedents}\t${consequents}\t${confidence}")
+		//}
+
+		//writer.close()
 
 	}
 

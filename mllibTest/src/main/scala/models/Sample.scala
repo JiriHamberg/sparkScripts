@@ -68,10 +68,12 @@ object Discretization {
 			None
 	}
 
-	def getFeatures(samples: RDD[Sample])(implicit sqlContext: SQLContext): RDD[Array[String]] = {
+	def getFeatures(samples: RDD[Sample])(implicit sqlContext: SQLContext): (RDD[Array[String]], scala.collection.mutable.Map[String, Array[Double]]) = {
+		val quantiles = scala.collection.mutable.Map[String, Array[Double]]()
 
 		// RATE
 		val rateQuantiles = getQuantiles(samples.map(_.rate), 4)
+		quantiles("rate") = rateQuantiles
 		
 		// CPU
 		val cpuPartial: PartialFunction[Double, Option[String]] = {
@@ -79,6 +81,7 @@ object Discretization {
 			case x if x > 100.0 => None
 		}
 		val cpuQuantiles = getQuantiles(samples.map(_.cpu), 4, partial = cpuPartial)
+		quantiles("cpu") = cpuQuantiles
 
 		// TRAVEL
 		val travelDistancePartial: PartialFunction[Double, Option[String]] = {
@@ -92,6 +95,7 @@ object Discretization {
 			case x if x > 100 => None
 		}
 		val temperatureQuantiles = getQuantiles(samples.map(_.temp), 4, partial = temperaturePartial)
+		quantiles("temperature") = temperatureQuantiles
 
 		// VOLTAGE
 		val voltageQuantiles = getQuantiles(samples.map(_.voltage), 3)
@@ -103,6 +107,7 @@ object Discretization {
 			case x if x > 255 => None
 		}
 		val screenQuantiles = getQuantiles(samples.map(_.screen), 4, partial = screenPartial)
+		quantiles("screen") = screenQuantiles
 
 		// MOBILE NETWORK TYPE
 		val mobileNetworkPartial: PartialFunction[String, Option[String]] = {
@@ -122,14 +127,16 @@ object Discretization {
 			case x if x > 0 => None
 		}
 		val wifiStrengthQuantiles = getQuantiles(samples.map(_.wifiStrength), 4, partial = wifiStrengthPartial)
+		quantiles("wifiStrength") = wifiStrengthQuantiles
 
 		//WIFI SPEED
 		val wifiSpeedPartial: PartialFunction[Double, Option[String]] = {
 			case x if x < 0 => None
 		}
 		val wifiSpeedQuantiles = getQuantiles(samples.map(_.wifiSpeed), 4, partial = wifiSpeedPartial)
+		quantiles("wifiSpeed") = wifiSpeedQuantiles
 
-		samples.map { sample => 
+		val features = samples.map { sample => 
 			Array(
 				getFeatureFromQuantiles(sample.rate, "rate", rateQuantiles),
 				getFeatureFromQuantiles(sample.cpu, "cpu", cpuQuantiles, partial = cpuPartial),
@@ -143,6 +150,7 @@ object Discretization {
 				getFeatureFromQuantiles(sample.wifiSpeed, "wifiSpeed", wifiSpeedQuantiles, partial = wifiSpeedPartial)
 			).collect { case Some(s) => s }
 		}
+		(features, quantiles)
 	}
 
 }
