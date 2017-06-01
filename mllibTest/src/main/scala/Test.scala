@@ -49,7 +49,7 @@ object Test {
 		//val ruleOutFile = args(2)
 
 		val samples = Sample.parseCSV(dataPath, sep = ";")
-		val (features, quantiles) = Discretization.getFeatures(samples)
+		val (features, bins) = Discretization.getFeatures(samples)
 
 		val fpg = new FPGrowth()
 			.setMinSupport(minSupport)
@@ -76,14 +76,18 @@ object Test {
 		
 		val (rules, time) = timeIt(rulesJSON.collect().toSeq)
 
-		//val rendered = pretty(render(rulesJSON.collect().toSeq))
-		val quantilesFormatted = quantiles.map { case (k,v) =>
-			k -> v.toSeq
+		/* By default a Map will become a list of objects
+		 * with one field each when converted to JSON.
+		 * We of course want one object with one field
+		 * per key value pair of the Map.
+		 */
+		val binsFormatted = bins.foldLeft(JObject()) {
+			case (prev, (k, v)) => prev ~ (k -> v)
 		}
 
 		val rendered = pretty(render {
 			("executionTime" -> time) ~
-			("quantiles" -> quantilesFormatted) ~
+			("bins" -> binsFormatted) ~
 			("rules" -> rules)
 		})
 
