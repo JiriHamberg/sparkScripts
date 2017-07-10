@@ -1,0 +1,3 @@
+[submodule "carat-tools"]
+	path = carat-tools
+	url = https://github.com/carat-project/carat-tools.git

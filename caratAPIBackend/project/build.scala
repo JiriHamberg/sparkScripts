@@ -6,6 +6,10 @@ import com.earldouglas.xwp.JettyPlugin
 import com.mojolly.scalate.ScalatePlugin._
 import ScalateKeys._
 
+import com.earldouglas.xwp.JettyPlugin
+import com.earldouglas.xwp.JettyPlugin.autoImport._
+import com.earldouglas.xwp.ContainerPlugin.autoImport._
+
 object CarapAPIProtoBuild extends Build {
   val Organization = "Carat"
   val Name = "Carat API Backend"
@@ -21,9 +25,7 @@ object CarapAPIProtoBuild extends Build {
       name := Name,
       version := Version,
       scalaVersion := ScalaVersion,
-      //force old jvm because users.cs.helsinki.fi uses tomcat6
-      //scalacOptions += "-target:jvm-1.7",
-      //javacOptions ++= Seq("-source", "1.7", "-target", "1.7"),
+      containerPort in Jetty := 44444,
       resolvers += Classpaths.typesafeReleases,
       resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases",
       libraryDependencies ++= Seq(
@@ -51,5 +53,5 @@ object CarapAPIProtoBuild extends Build {
         )
       }*/
     )
-  ).enablePlugins(JettyPlugin)
+  ) //.enablePlugins(JettyPlugin)
 }
