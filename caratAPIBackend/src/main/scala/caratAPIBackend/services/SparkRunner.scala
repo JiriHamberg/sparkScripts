@@ -17,12 +17,12 @@ object SparkRunner {
 
 	implicit val executor =  ExecutionContext.global
 
-	def runSpark(minSupport: Option[Double] = None, minConfidence: Option[Double] = None): Future[String] = {
+	def runSpark(minSupport: Option[Double] = None, minConfidence: Option[Double] = None, excluded: String = ""): Future[String] = {
 		val support = minSupport.getOrElse(defaultMinSupport)
 		val confidence = minConfidence.getOrElse(defaultMinConfidence)
 
 		Future {
-			s"${sparkSubmitScript} ${sparkSubmitClass} ${sparkSubmitJar} ${support} ${confidence}" !!
+      s"${sparkSubmitScript} ${sparkSubmitClass} ${sparkSubmitJar} ${support} ${confidence} ${excluded}" !!
 		}
 	}
 

@@ -46,10 +46,11 @@ object Test {
 
 		val minSupport = args(0).toDouble
 		val minConfidence = args(1).toDouble
+    val excluded: Set[String] = if (args.length < 3) Set() else args(2).trim.split(",").toSet
 		//val ruleOutFile = args(2)
 
 		val samples = Sample.parseCSV(dataPath, sep = ";")
-		val (features, bins) = Discretization.getFeatures(samples)
+		val (features, bins) = Discretization.getFeatures(samples, excluded)
 
 		val fpg = new FPGrowth()
 			.setMinSupport(minSupport)
@@ -73,7 +74,7 @@ object Test {
 			("consequents" -> rule.consequent.toSeq) ~
 			("confidence" -> rule.confidence)
 		}
-		
+
 		val (rules, time) = timeIt(rulesJSON.collect().toSeq)
 
 		/* By default a Map will become a list of objects
@@ -86,6 +87,8 @@ object Test {
 		}
 
 		val rendered = pretty(render {
+      ("minSupport" -> minSupport) ~
+      ("minConfidence" -> minConfidence) ~
 			("executionTime" -> time) ~
 			("bins" -> binsFormatted) ~
 			("rules" -> rules)

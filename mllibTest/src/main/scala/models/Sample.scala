@@ -12,14 +12,14 @@ case class Sample(
 	temp: Double,
 	voltage: Double,
 	screen: Double,
-	mobileNetwork: String, 
+	mobileNetwork: String,
 	network: String,
 	wifiStrength: Double,
 	wifiSpeed: Double
 )
 object Sample {
 	def parseCSV(filePath: String, sep: String = ",")(implicit sc: SparkContext): RDD[Sample] = {
-		sc.textFile(filePath).map{ line => 
+		sc.textFile(filePath).map{ line =>
 			val cols = line.trim.split(sep)
 			Sample(
 				rate = cols(0).toDouble,
@@ -32,7 +32,7 @@ object Sample {
 				network = cols(7),
 				wifiStrength = cols(8).toDouble,
 				wifiSpeed = cols(9).toDouble
-			) 
+			)
 		}
 	}
 }
@@ -64,24 +64,25 @@ object Discretization {
 	private def getFeatureFromPartial[T](dataPoint: T, featureName: String, partial: PartialFunction[T, Option[String]]): Option[String] = {
 		if(partial.isDefinedAt(dataPoint))
 			partial(dataPoint).map(x => s"${featureName}=${x}")
-		else 
+		else
 			None
 	}
 
-	def getFeatures(samples: RDD[Sample])(implicit sqlContext: SQLContext): (RDD[Array[String]], scala.collection.mutable.Map[String, Seq[Double]]) = {
+	def getFeatures(samples: RDD[Sample], excluded: Set[String])(implicit sqlContext: SQLContext): (RDD[Array[String]], scala.collection.mutable.Map[String, Seq[Double]]) = {
 		val bins = scala.collection.mutable.Map[String, Seq[Double]]()
 
 		// RATE
 		val rateQuantiles = getQuantiles(samples.map(_.rate), 4)
 		bins("rate") = Seq(0.0) ++ rateQuantiles.toSeq ++ Seq(1.0)
-		
+
 		// CPU
 		val cpuPartial: PartialFunction[Double, Option[String]] = {
 			case x if x < 0.0 => None
 			case x if x > 100.0 => None
 		}
 		val cpuQuantiles = getQuantiles(samples.map(_.cpu), 4, partial = cpuPartial)
-		bins("cpu") = Seq(0.0) ++ cpuQuantiles.toSeq ++ Seq(100.0)
+    if(!excluded.contains("cpu"))
+		  bins("cpu") = Seq(0.0) ++ cpuQuantiles.toSeq ++ Seq(100.0)
 
 		// TRAVEL
 		val travelDistancePartial: PartialFunction[Double, Option[String]] = {
@@ -95,7 +96,8 @@ object Discretization {
 			case x if x > 100 => None
 		}
 		val temperatureQuantiles = getQuantiles(samples.map(_.temp), 4, partial = temperaturePartial)
-		bins("temperature") = Seq(5.0) ++ temperatureQuantiles.toSeq ++ Seq(100.0)
+		if(!excluded.contains("temperature"))
+    bins("temperature") = Seq(5.0) ++ temperatureQuantiles.toSeq ++ Seq(100.0)
 
 		// VOLTAGE
 		val voltageQuantiles = getQuantiles(samples.map(_.voltage), 3)
@@ -107,7 +109,8 @@ object Discretization {
 			case x if x > 255 => None
 		}
 		val screenQuantiles = getQuantiles(samples.map(_.screen), 4, partial = screenPartial)
-		bins("screen") = Seq(0.0) ++ screenQuantiles.toSeq ++ Seq(255.0)
+		if(!excluded.contains("screen"))
+      bins("screen") = Seq(0.0) ++ screenQuantiles.toSeq ++ Seq(255.0)
 
 		// MOBILE NETWORK TYPE
 		val mobileNetworkPartial: PartialFunction[String, Option[String]] = {
@@ -127,27 +130,48 @@ object Discretization {
 			case x if x > 0 => None
 		}
 		val wifiStrengthQuantiles = getQuantiles(samples.map(_.wifiStrength), 4, partial = wifiStrengthPartial)
-		bins("wifiStrength") = Seq(-100.0) ++ wifiStrengthQuantiles.toSeq ++ Seq(0.0)
+		if(!excluded.contains("wifiStrength"))
+      bins("wifiStrength") = Seq(-100.0) ++ wifiStrengthQuantiles.toSeq ++ Seq(0.0)
 
 		//WIFI SPEED
 		val wifiSpeedPartial: PartialFunction[Double, Option[String]] = {
 			case x if x < 0 => None
 		}
 		val wifiSpeedQuantiles = getQuantiles(samples.map(_.wifiSpeed), 4, partial = wifiSpeedPartial)
-		bins("wifiSpeed") = Seq(0.0) ++ wifiSpeedQuantiles.toSeq ++ Seq(Double.PositiveInfinity)	
+		if(!excluded.contains("wifiSpeed"))
+      bins("wifiSpeed") = Seq(0.0) ++ wifiSpeedQuantiles.toSeq ++ Seq(Double.PositiveInfinity)
 
-		val features = samples.map { sample => 
+		val features = samples.map { sample =>
 			Array(
 				getFeatureFromQuantiles(sample.rate, "rate", rateQuantiles),
-				getFeatureFromQuantiles(sample.cpu, "cpu", cpuQuantiles, partial = cpuPartial),
-				getFeatureFromQuantiles(sample.distance, "distance", Array.empty, partial = travelDistancePartial),
-				getFeatureFromQuantiles(sample.temp, "temp", temperatureQuantiles, partial = temperaturePartial),
-				getFeatureFromQuantiles(sample.voltage, "voltage", voltageQuantiles),
-				getFeatureFromQuantiles(sample.screen, "screen", screenQuantiles, partial = screenPartial),
-				getFeatureFromPartial(sample.mobileNetwork, "mobileNetType", mobileNetworkPartial),
-				getFeatureFromPartial(sample.network, "netType", networkPartial),
-				getFeatureFromQuantiles(sample.wifiStrength, "wifiStrength", wifiStrengthQuantiles, partial = wifiStrengthPartial),
-				getFeatureFromQuantiles(sample.wifiSpeed, "wifiSpeed", wifiSpeedQuantiles, partial = wifiSpeedPartial)
+				if(!excluded.contains("cpu"))
+          getFeatureFromQuantiles(sample.cpu, "cpu", cpuQuantiles, partial = cpuPartial)
+        else
+          None,
+        if(!excluded.contains("distance"))
+				  getFeatureFromQuantiles(sample.distance, "distance", Array.empty, partial = travelDistancePartial)
+        else None,
+        if(!excluded.contains("temp"))
+				  getFeatureFromQuantiles(sample.temp, "temp", temperatureQuantiles, partial = temperaturePartial)
+        else None,
+        if(!excluded.contains("voltage"))
+				  getFeatureFromQuantiles(sample.voltage, "voltage", voltageQuantiles)
+        else None,
+        if(!excluded.contains("screen"))
+				  getFeatureFromQuantiles(sample.screen, "screen", screenQuantiles, partial = screenPartial)
+        else None,
+        if(!excluded.contains("mobileNetType"))
+				  getFeatureFromPartial(sample.mobileNetwork, "mobileNetType", mobileNetworkPartial)
+        else None,
+        if(!excluded.contains("netType"))
+				  getFeatureFromPartial(sample.network, "netType", networkPartial)
+        else None,
+				if(!excluded.contains("wifiStrength"))
+          getFeatureFromQuantiles(sample.wifiStrength, "wifiStrength", wifiStrengthQuantiles, partial = wifiStrengthPartial)
+        else None,
+				if(!excluded.contains("wifiSpeed"))
+          getFeatureFromQuantiles(sample.wifiSpeed, "wifiSpeed", wifiSpeedQuantiles, partial = wifiSpeedPartial)
+        else None
 			).collect { case Some(s) => s }
 		}
 		(features, bins)
