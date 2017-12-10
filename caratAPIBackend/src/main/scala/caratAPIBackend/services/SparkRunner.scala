@@ -15,14 +15,14 @@ object SparkRunner {
 	val defaultMinConfidence = conf.getDouble("sparkSubmit.defaults.minConfidence")
 	val defaultMinSupport = conf.getDouble("sparkSubmit.defaults.minSupport")
 
-	implicit val executor =  ExecutionContext.global
+	implicit val executor = ExecutionContext.global
 
-	def runSpark(minSupport: Option[Double] = None, minConfidence: Option[Double] = None, excluded: String = ""): Future[String] = {
+	def runSpark(applicationName: String, minSupport: Option[Double] = None, minConfidence: Option[Double] = None, excluded: String = ""): Future[String] = {
 		val support = minSupport.getOrElse(defaultMinSupport)
 		val confidence = minConfidence.getOrElse(defaultMinConfidence)
 
 		Future {
-      s"${sparkSubmitScript} ${sparkSubmitClass} ${sparkSubmitJar} ${support} ${confidence} ${excluded}" !!
+      s"${sparkSubmitScript} ${sparkSubmitClass} ${sparkSubmitJar} ${applicationName} ${support} ${confidence} ${excluded}" !!
 		}
 	}
 

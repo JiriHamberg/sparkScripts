@@ -9,15 +9,16 @@ import org.apache.spark.sql.Row
 
 import org.apache.spark.ml.feature.QuantileDiscretizer
 import org.apache.spark.mllib.fpm.FPGrowth
+import org.apache.spark.mllib.fpm.AssociationRules.Rule
 
 import java.io._
 import org.json4s._
 import org.json4s.jackson.JsonMethods._
 import org.json4s.JsonDSL._
 
+import mllibTest.utils.TimeUtils
 import mllibTest.models.samples._
 
-//import fi.helsinki.cs.nodes.carat.sample.Sample
 
 object Main {
 
@@ -30,17 +31,34 @@ object Main {
 			.getOrCreate()
 	}
 
-	def timeIt[T](block: => T): (T, Long) = {
-		val t0 = System.currentTimeMillis()
-		val result = block
-		val t1 = System.currentTimeMillis()
-		(result, t1 - t0)
-	}
 
-	def readCaratSamples(sampleDir: String)(implicit sc: SparkContext): RDD[fi.helsinki.cs.nodes.carat.sample.Sample] = {
-		//TODO read all parts
-		sc.objectFile[fi.helsinki.cs.nodes.carat.sample.Sample](s"${sampleDir}/part-00001")
-	}
+  def readCaratRates(sampleDir: String)(implicit sc: SparkContext): RDD[fi.helsinki.cs.nodes.carat.sample.Rate] = {
+    sc.objectFile[fi.helsinki.cs.nodes.carat.sample.Rate](s"${sampleDir}")
+  }
+
+  /* Filter out rules that are supersets of other rules with same consequents and confidence.
+   * We are always interested about the most general rules.
+   *
+   */
+  def pruneRules(rules: RDD[Rule[String]]): RDD[Rule[String]] = {
+    val pruneCandidateGroups = rules.groupBy(rule => (rule.consequent.sorted.mkString, rule.confidence))
+
+    pruneCandidateGroups.flatMap { case (key, group) =>
+      val groupSorted = group.toSeq.sortBy(rule => rule.consequent.length)
+      var groupAsSets = group.map(rule => (rule, rule.antecedent.toSet))
+
+      val toPrune: Set[Rule[String]] = (for {
+        testRule <- groupAsSets
+        otherRule <- groupAsSets
+        if testRule != otherRule && testRule._2.subsetOf(otherRule._2)
+      } yield(otherRule._1)).toSet
+
+      groupSorted.filter(rule => !toPrune.contains(rule))
+    }
+
+  }
+
+  //def pruneRules(rules: RDD[Rule[String]]): RDD[Rule[String]] = rules
 
 	def main(args: Array[String]): Unit = {
 
@@ -48,76 +66,71 @@ object Main {
 		implicit val sc = spark.sparkContext
 		implicit val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 
-		//val dataPath = "/home/carat/singlesamples-from-2016-08-26-to-2016-10-03-facebook-and-features-text-discharge-noinfs.csv"
-		val dataPath = "/cs/work/group/carat/appusage/single-samples-all-until-2017-04-18-cc-mcc-obj"
+    //val ratePath = "/cs/work/group/carat/jirihamb/single-samples-2016-06-22-until-2016-08-22-cc-mcc-obj-rates/"
+    val ratePath = "/dev/shm/tmp/spark/jirihamb/single-samples-2016-06-22-until-2016-08-22-cc-mcc-obj-rates/"
 
-		val samples = readCaratSamples(dataPath)
 
-		//val minSupport = args(0).toDouble
-		//val minConfidence = args(1).toDouble
-		//val ruleOutFile = args(2)
+    if (args.length < 3) {
+      throw new Exception("Invalid number of arguments.")
+    }
 
-		//val samples = Sample.parseCSV(dataPath, sep = ";")
+    val applicationName = args(0)
+		val minSupport = args(1).toDouble
+		val minConfidence = args(2).toDouble
+    val excluded: Set[String] = if (args.length < 4) Set() else args(3).trim.split(",").toSet
 
-		println(samples.count)
+    val samples = readCaratRates(ratePath).collect {
+      case rate if rate.allApps().contains(applicationName) => Sample.fromCaratRate(rate)
+    }
 
-		samples.take(5).foreach { sample =>
-			println(sample)
-		}
+    val (features, bins) = Discretization.getFeatures(samples, excluded)
 
-		//val (features, bins) = Discretization.getFeatures(samples)
-
-		/*val fpg = new FPGrowth()
+		val fpg = new FPGrowth()
 			.setMinSupport(minSupport)
-			.setNumPartitions(10)
-		val model = fpg.run(features)*/
+			//.setNumPartitions(10)
+    val (model, fPGrowthRunTime) = TimeUtils.timeIt{ fpg.run(features) }
 
-		//val outFile = new File(ruleOutFile)
-		//val writer = new BufferedWriter(new FileWriter(outFile))
-
-		//val rulesJSON = model.generateAssociationRules(minConfidence)
+    val rulesFiltered = model.generateAssociationRules(minConfidence)
 		//take only rules which contain energy rate in the consequent
-		/*.filter { rule =>
+		.filter { rule =>
 			rule.consequent.find { item =>
 				item.startsWith("rate=")
 			}.isDefined
-		}*/
+		}
+
+    val rulesPruned = pruneRules(rulesFiltered)
 		//sort rules by descending confidence
-		/*.sortBy( - _.confidence)
-		.map { rule =>
+		.sortBy( - _.confidence)
+
+    val rulesJSON = rulesPruned.map { rule =>
 			("antecedents" -> rule.antecedent.toSeq) ~
 			("consequents" -> rule.consequent.toSeq) ~
 			("confidence" -> rule.confidence)
-		}*/
-		
-		//val (rules, time) = timeIt(rulesJSON.collect().toSeq)
+		}
+
+		val (rules, time) = TimeUtils.timeIt(rulesJSON.collect().toSeq)
+
 
 		/* By default a Map will become a list of objects
 		 * with one field each when converted to JSON.
 		 * We of course want one object with one field
 		 * per key value pair of the Map.
 		 */
-		/*val binsFormatted = bins.foldLeft(JObject()) {
+		val binsFormatted = bins.foldLeft(JObject()) {
 			case (prev, (k, v)) => prev ~ (k -> v)
-		}*/
+		}
 
-		/*val rendered = pretty(render {
-			("executionTime" -> time) ~
+		val rendered = pretty(render {
+      ("applicationName" -> applicationName) ~
+      ("minSupport" -> minSupport) ~
+      ("minConfidence" -> minConfidence) ~
+			("FPGrowthRunTime" -> fPGrowthRunTime) ~
+      ("executionTime" -> time) ~
 			("bins" -> binsFormatted) ~
 			("rules" -> rules)
 		})
 
-		println(rendered)*/
-
-		//.foreach { rule =>
-		//	val antecedents = rule.antecedent.mkString(",")
-		//	val consequents = rule.consequent.mkString(",")
-		//	val confidence = rule.confidence
-			//writer.write(s"${antecedents}\t${consequents}\t${confidence}\n")
-			//println(s"${antecedents}\t${consequents}\t${confidence}")
-		//}
-
-		//writer.close()
+		println(rendered)
 
 	}
 

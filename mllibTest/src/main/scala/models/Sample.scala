@@ -5,6 +5,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.SQLContext
 
+
 case class Sample(
 	rate: Double,
 	cpu: Double,
@@ -35,14 +36,98 @@ object Sample {
 			)
 		}
 	}
+
+  def fromCaratRate(caratRate: fi.helsinki.cs.nodes.carat.sample.Rate) = {
+    Sample(
+      rate = caratRate.rate(),
+      cpu = caratRate.sp._2.androidFields.cpuUsage,
+      distance = caratRate.sp._2.distanceTraveled,
+      temp = caratRate.sp._2.androidFields.battery.temperature,
+      voltage = caratRate.sp._2.androidFields.battery.voltage,
+      screen = caratRate.sp._2.androidFields.screenBrightness,
+      mobileNetwork = caratRate.sp._2.androidFields.networkInfo.mobileNetworkType,
+      network = caratRate.sp._2.androidFields.networkInfo.networkType,
+      wifiStrength = caratRate.sp._2.androidFields.networkInfo.wifiSignalStrength.toDouble,
+      wifiSpeed = caratRate.sp._2.androidFields.networkInfo.wifiLinkSpeed.toDouble
+    )
+  }
 }
+
+case class SampleDiscretization(
+  rate: Array[Double],
+  cpu: Array[Double],
+  distance: Array[Double],
+	temp: Array[Double],
+	voltage: Array[Double],
+	screen: Array[Double],
+	wifiStrength: Array[Double],
+	wifiSpeed: Array[Double]
+)
+
+object SampleDiscretization {
+  def fromSamples(samples: RDD[Sample], nBins: Int = 4)(implicit sqlContext: SQLContext): SampleDiscretization = {
+
+      SampleDiscretization(
+        rate = Discretization.getQuantiles(samples.map(s => s.rate), nBins),
+        cpu = Discretization.getQuantiles(samples.map(s => s.cpu), nBins, partial = Discretization.cpuPartial),
+        distance = Discretization.getQuantiles(samples.map(s => s.distance), nBins, partial = Discretization.travelDistancePartial),
+        temp = Discretization.getQuantiles(samples.map(s => s.temp), nBins, partial = Discretization.temperaturePartial),
+        voltage = Discretization.getQuantiles(samples.map(s => s.voltage), nBins),
+        screen = Discretization.getQuantiles(samples.map(s => s.screen), nBins, partial = Discretization.screenPartial),
+        wifiStrength = Discretization.getQuantiles(samples.map(s => s.wifiStrength), nBins, partial = Discretization.wifiStrengthPartial),
+        wifiSpeed = Discretization.getQuantiles(samples.map(s => s.wifiSpeed), nBins, partial = Discretization.wifiSpeedPartial)
+      )
+  }
+
+}
+
 
 object Discretization {
 
-	private def getQuantiles(
+  val cpuPartial: PartialFunction[Double, Option[String]] = {
+    case x if x < 0.0 => None
+    case x if x > 100.0 => None
+	}
+
+  val travelDistancePartial: PartialFunction[Double, Option[String]] = {
+    case x if x >= 100 => Some("yes")
+    case x if x < 100 => Some("no")
+  }
+
+  val temperaturePartial: PartialFunction[Double, Option[String]] = {
+    case x if x < 5 => None
+    case x if x > 100 => None
+  }
+
+  val screenPartial: PartialFunction[Double, Option[String]] = {
+    case x if x == -1 => Some("auto")
+    case x if x < -1 => None
+    case x if x > 255 => None
+  }
+
+  val mobileNetworkPartial: PartialFunction[String, Option[String]] = {
+    case "unknown" | "null" | "0" | "16" | "18" | "19" | "30" => Some("unknown")
+    case x => Some(x)
+  }
+
+  val networkPartial: PartialFunction[String, Option[String]] = {
+    case "unknown" | "null" => Some("unknown")
+    case x => Some(x)
+  }
+
+  val wifiStrengthPartial: PartialFunction[Double, Option[String]] = {
+    case x if x < -100 => None
+    case x if x > 0 => None
+  }
+
+  val wifiSpeedPartial: PartialFunction[Double, Option[String]] = {
+    case x if x < 0 => None
+  }
+
+	def getQuantiles(
 		data: RDD[Double],
 		buckets: Int,
-		relativeError: Double = 0.05,
+		relativeError: Double = 0.0001,
 		partial: PartialFunction[Double, Option[String]] = Map.empty)
 		(implicit sqlContext: SQLContext): Array[Double] = {
 
@@ -50,8 +135,14 @@ object Discretization {
 
 		val percentiles = (for(i <- 1 to (buckets - 1)) yield (1.0 / buckets) * i).toArray
 		val notDefined = data.filter(x => !partial.isDefinedAt(x))
-		val quantiles = notDefined.toDF("col").stat.approxQuantile("col", percentiles, relativeError)
-		notDefined.toDF("col").stat.approxQuantile("col", percentiles, relativeError)
+    //val quantiles = notDefined.toDF("col").stat.approxQuantile("col", percentiles, relativeError)
+
+    try {
+		  notDefined.toDF("col").stat.approxQuantile("col", percentiles, relativeError)
+    } catch{
+      //see https://issues.apache.org/jira/browse/SPARK-21550
+      case ex: java.util.NoSuchElementException => Array[Double]()
+    }
 	}
 
 	private def getFeatureFromQuantiles(dataPoint: Double, featureName: String, quantiles: Array[Double], partial: PartialFunction[Double, Option[String]] = Map.empty): Option[String] = {
@@ -75,26 +166,11 @@ object Discretization {
 		val rateQuantiles = getQuantiles(samples.map(_.rate), 4)
 		bins("rate") = Seq(0.0) ++ rateQuantiles.toSeq ++ Seq(1.0)
 
-		// CPU
-		val cpuPartial: PartialFunction[Double, Option[String]] = {
-			case x if x < 0.0 => None
-			case x if x > 100.0 => None
-		}
 		val cpuQuantiles = getQuantiles(samples.map(_.cpu), 4, partial = cpuPartial)
     if(!excluded.contains("cpu"))
 		  bins("cpu") = Seq(0.0) ++ cpuQuantiles.toSeq ++ Seq(100.0)
 
-		// TRAVEL
-		val travelDistancePartial: PartialFunction[Double, Option[String]] = {
-			case x if x >= 100 => Some("yes")
-			case x if x < 100 => Some("no")
-		}
-
 		// TEMPERATURE
-		val temperaturePartial: PartialFunction[Double, Option[String]] = {
-			case x if x < 5 => None
-			case x if x > 100 => None
-		}
 		val temperatureQuantiles = getQuantiles(samples.map(_.temp), 4, partial = temperaturePartial)
 		if(!excluded.contains("temperature"))
     bins("temperature") = Seq(5.0) ++ temperatureQuantiles.toSeq ++ Seq(100.0)
@@ -103,40 +179,20 @@ object Discretization {
 		val voltageQuantiles = getQuantiles(samples.map(_.voltage), 3)
 
 		// SCREEN
-		val screenPartial: PartialFunction[Double, Option[String]] = {
-			case x if x == -1 => Some("auto")
-			case x if x < -1 => None
-			case x if x > 255 => None
-		}
 		val screenQuantiles = getQuantiles(samples.map(_.screen), 4, partial = screenPartial)
 		if(!excluded.contains("screen"))
       bins("screen") = Seq(0.0) ++ screenQuantiles.toSeq ++ Seq(255.0)
 
 		// MOBILE NETWORK TYPE
-		val mobileNetworkPartial: PartialFunction[String, Option[String]] = {
-			case "unknown" | "null" | "0" | "16" | "18" | "19" | "30" => Some("unknown")
-			case x => Some(x)
-		}
 
 		// NETWORK TYPE
-		val networkPartial: PartialFunction[String, Option[String]] = {
-			case "unknown" | "null" => Some("unknown")
-			case x => Some(x)
-		}
 
 		//WIFI STRENGTH
-		val wifiStrengthPartial: PartialFunction[Double, Option[String]] = {
-			case x if x < -100 => None
-			case x if x > 0 => None
-		}
 		val wifiStrengthQuantiles = getQuantiles(samples.map(_.wifiStrength), 4, partial = wifiStrengthPartial)
 		if(!excluded.contains("wifiStrength"))
       bins("wifiStrength") = Seq(-100.0) ++ wifiStrengthQuantiles.toSeq ++ Seq(0.0)
 
 		//WIFI SPEED
-		val wifiSpeedPartial: PartialFunction[Double, Option[String]] = {
-			case x if x < 0 => None
-		}
 		val wifiSpeedQuantiles = getQuantiles(samples.map(_.wifiSpeed), 4, partial = wifiSpeedPartial)
 		if(!excluded.contains("wifiSpeed"))
       bins("wifiSpeed") = Seq(0.0) ++ wifiSpeedQuantiles.toSeq ++ Seq(Double.PositiveInfinity)
